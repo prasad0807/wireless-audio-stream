@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wired Audio Receiver</title>
+    <style>
+        body { font-family: system-ui, sans-serif; text-align: center; padding-top: 20vh; background: #111; color: white; }
+        button { padding: 20px 40px; font-size: 24px; border-radius: 12px; cursor: pointer; background: #007aff; color: white; border: none; font-weight: bold; }
+        button:active { background: #005bb5; }
+        #status { margin-top: 20px; font-size: 18px; color: #888; }
+    </style>
+</head>
+<body>
+    <h1>Wired Audio Stream</h1>
+    <p>Connected via iPhone USB Hotspot</p>
+    
+    <button id="startBtn">Start Listening</button>
+    <p id="status">Waiting...</p>
+
+    <script>
+        // 👇 YOUR TASK: We will update this IP address in Step 4!
+        const LAPTOP_IP = '172.20.10.4'; 
+        
+        let audioCtx;
+        let ws;
+
+        document.getElementById('startBtn').addEventListener('click', () => {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            const statusEl = document.getElementById('status');
+            statusEl.innerText = `Connecting to wired server at ${LAPTOP_IP}...`;
+
+            ws = new WebSocket(`ws://${LAPTOP_IP}:8080`);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                statusEl.innerText = 'Connected! Low-latency streaming...';
+                statusEl.style.color = '#34d399';
+            };
+
+            let nextTime = 0;
+
+            ws.onmessage = (event) => {
+                const int16Array = new Int16Array(event.data);
+                const numSamples = int16Array.length / 2;
+                
+                const audioBuffer = audioCtx.createBuffer(2, numSamples, 44100);
+                const leftChannel = audioBuffer.getChannelData(0);
+                const rightChannel = audioBuffer.getChannelData(1);
+
+                for (let i = 0; i < numSamples; i++) {
+                    leftChannel[i] = int16Array[i * 2] / 32768;
+                    rightChannel[i] = int16Array[i * 2 + 1] / 32768;
+                }
+
+                const source = audioCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioCtx.destination);
+
+                // Extremely tight buffer (20ms) since the USB wire has zero jitter
+                if (nextTime === 0 || nextTime < audioCtx.currentTime) {
+                    nextTime = audioCtx.currentTime + 0.02; 
+                }
+                
+                source.start(nextTime);
+                nextTime += audioBuffer.duration;
+            };
+
+            ws.onclose = () => {
+                statusEl.innerText = 'Disconnected.';
+                statusEl.style.color = '#f87171';
+            };
+        });
+    </script>
+</body>
+</html>
